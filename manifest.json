@@ -1,0 +1,51 @@
+{
+  "id": "hunyuan3d-mini",
+  "name": "Hunyuan3D 2 Mini",
+  "source": "https://github.com/modly-ai/extension-hunyuan3d-mini",
+  "description": "Lightweight Hunyuan3D variant with 0.6B parameters. Fast generation with optional PBR texture support. Requires 6+ GB VRAM.",
+  "version": "2.0.0",
+  "author": "Lightning Pixel",
+  "generator_class": "Hunyuan3DMiniGenerator",
+  "tags": ["image-to-3d", "texture", "low-vram"],
+  "models": [
+    {
+      "id": "hunyuan3d-mini",
+      "name": "Standard",
+      "hf_repo": "tencent/Hunyuan3D-2mini",
+      "download_check": "hunyuan3d-dit-v2-mini",
+      "hf_skip_prefixes": [
+        "hunyuan3d-dit-v2-mini-turbo/",
+        "hunyuan3d-dit-v2-mini-fast/",
+        "hunyuan3d-vae-v2-mini-turbo/",
+        "hunyuan3d-vae-v2-mini-withencoder/"
+      ],
+      "description": "Balanced quality and speed"
+    },
+    {
+      "id": "hunyuan3d-mini-turbo",
+      "name": "Turbo",
+      "hf_repo": "tencent/Hunyuan3D-2mini",
+      "download_check": "hunyuan3d-dit-v2-mini-turbo",
+      "hf_skip_prefixes": [
+        "hunyuan3d-dit-v2-mini/",
+        "hunyuan3d-dit-v2-mini-fast/",
+        "hunyuan3d-vae-v2-mini/",
+        "hunyuan3d-vae-v2-mini-withencoder/"
+      ],
+      "description": "Faster generation, slightly lower quality"
+    },
+    {
+      "id": "hunyuan3d-mini-fast",
+      "name": "Fast",
+      "hf_repo": "tencent/Hunyuan3D-2mini",
+      "download_check": "hunyuan3d-dit-v2-mini-fast",
+      "hf_skip_prefixes": [
+        "hunyuan3d-dit-v2-mini/",
+        "hunyuan3d-dit-v2-mini-turbo/",
+        "hunyuan3d-vae-v2-mini-turbo/",
+        "hunyuan3d-vae-v2-mini-withencoder/"
+      ],
+      "description": "Maximum speed, reduced detail"
+    }
+  ]
+}

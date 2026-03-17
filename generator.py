@@ -29,7 +29,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
     VRAM_GB      = 6
 
     # ------------------------------------------------------------------ #
-    # Cycle de vie
+    # Lifecycle
     # ------------------------------------------------------------------ #
 
     def is_downloaded(self) -> bool:
@@ -73,7 +73,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             pass
 
     # ------------------------------------------------------------------ #
-    # Inférence
+    # Inference
     # ------------------------------------------------------------------ #
 
     def generate(
@@ -194,13 +194,13 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         except (ImportError, OSError) as exc:
             base = self.model_dir / "_hy3dgen" / "hy3dgen" / "texgen"
             raise RuntimeError(
-                "Les extensions C++ pour la génération de texture ne sont pas compilées.\n"
-                "Compile-les avec :\n\n"
+                "C++ extensions for texture generation are not compiled.\n"
+                "Build them with:\n\n"
                 f"  cd \"{base / 'custom_rasterizer'}\"\n"
                 f"  python setup.py install\n\n"
                 f"  cd \"{base / 'differentiable_renderer'}\"\n"
                 f"  python setup.py install\n\n"
-                f"Erreur originale : {exc}"
+                f"Original error: {exc}"
             ) from exc
 
     def _ensure_paint_weights(self) -> None:
@@ -269,8 +269,8 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline  # noqa: F401
         except ImportError as exc:
             raise RuntimeError(
-                f"hy3dgen toujours non importable après extraction dans {src_dir}.\n"
-                f"Vérifiez le contenu du dossier.\n{exc}"
+                f"hy3dgen still not importable after extraction to {src_dir}.\n"
+                f"Check the folder contents.\n{exc}"
             ) from exc
 
     def _download_hy3dgen(self, dest: Path) -> None:

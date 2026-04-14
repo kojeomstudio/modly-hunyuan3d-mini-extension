@@ -81,7 +81,12 @@ def python_tag(venv: Path) -> str:
     ).strip()
 
 
-def install_arm64_pytorch(venv: Path, wheel_map: dict[str, dict[str, str]], label: str) -> None:
+def install_arm64_pytorch(
+    venv: Path,
+    wheel_map: dict[str, dict[str, str]],
+    label: str,
+    extra_index_url: str,
+) -> None:
     py_tag = python_tag(venv)
     wheel_urls = wheel_map.get(py_tag)
     if wheel_urls is None:
@@ -92,6 +97,8 @@ def install_arm64_pytorch(venv: Path, wheel_map: dict[str, dict[str, str]], labe
         venv,
         "install",
         "--no-cache-dir",
+        "--extra-index-url",
+        extra_index_url,
         wheel_urls["torch"],
         wheel_urls["torchvision"],
     )
@@ -111,12 +118,12 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
     if is_linux_arm64 and (gpu_sm >= 100 or cuda_version >= 128):
         # Match TripoSG's CUDA 12.8 selection, but keep ARM64 hardening.
         print(f"[setup] GPU SM {gpu_sm}, CUDA {cuda_version}, Linux ARM64 -> PyTorch 2.7 + CUDA 12.8")
-        install_arm64_pytorch(venv, ARM64_CU128_WHEELS, "cu128")
+        install_arm64_pytorch(venv, ARM64_CU128_WHEELS, "cu128", "https://download.pytorch.org/whl/cu128")
     elif is_linux_arm64 and gpu_sm >= 70:
         # Use direct wheel URLs on Linux ARM64 to avoid bad cache/CDN responses
         # while keeping the upstream-published sha256 integrity checks.
         print(f"[setup] GPU SM {gpu_sm}, Linux ARM64 -> PyTorch 2.5 + CUDA 12.4")
-        install_arm64_pytorch(venv, ARM64_CU124_WHEELS, "cu124")
+        install_arm64_pytorch(venv, ARM64_CU124_WHEELS, "cu124", "https://download.pytorch.org/whl/cu124")
     elif gpu_sm >= 100 or cuda_version >= 128:
         # Match TripoSG's CUDA 12.8 path on non-ARM64 platforms too.
         torch_index = "https://download.pytorch.org/whl/cu128"

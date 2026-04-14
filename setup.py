@@ -10,9 +10,10 @@ where json_args contains:
     python_exe  — path to Modly's embedded Python (used to create the venv)
     ext_dir     — absolute path to this extension directory
     gpu_sm      — GPU compute capability as integer (e.g. 61 for Pascal, 86 for Ampere)
+    cuda_version — CUDA major/minor encoded as integer (e.g. 124, 128)
 
 Example (manual test):
-    python setup.py '{"python_exe":"C:/…/python.exe","ext_dir":"C:/…/hunyuan3d-2-mini","gpu_sm":86}'
+    python setup.py '{"python_exe":"C:/…/python.exe","ext_dir":"C:/…/hunyuan3d-2-mini","gpu_sm":86,"cuda_version":128}'
 """
 import json
 import platform
@@ -41,6 +42,30 @@ ARM64_CU124_WHEELS = {
 }
 
 
+ARM64_CU128_WHEELS = {
+    "cp310": {
+        "torch": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp310-cp310-manylinux_2_28_aarch64.whl#sha256=b1f0cdd0720ad60536deb5baa427b782fd920dd4fcf72e244d32974caafa3b9e",
+        "torchvision": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.22.0-cp310-cp310-manylinux_2_28_aarch64.whl#sha256=566224d7b4f00bc6366bed1d62f834ca80f8e57fe41e10e4a5636bfa3ffb984e",
+    },
+    "cp311": {
+        "torch": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp311-cp311-manylinux_2_28_aarch64.whl#sha256=47c895bcab508769d129d717a4b916b10225ae3855723aeec8dff8efe5346207",
+        "torchvision": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.22.0-cp311-cp311-manylinux_2_28_aarch64.whl#sha256=6be714bcdd8849549571f6acfaa2dfa9e00676f042bda517432745fb116f7904",
+    },
+    "cp312": {
+        "torch": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=6bba7dca5d9a729f1e8e9befb98055498e551efaf5ed034824c168b560afc1ac",
+        "torchvision": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.22.0-cp312-cp312-manylinux_2_28_aarch64.whl#sha256=6e9752b48c1cdd7f6428bcd30c3d198b30ecea348d16afb651f95035e5252506",
+    },
+    "cp313": {
+        "torch": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp313-cp313-manylinux_2_28_aarch64.whl#sha256=633f35e8b1b1f640ef5f8a98dbd84f19b548222ce7ba8f017fe47ce6badc106a",
+        "torchvision": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.22.0-cp313-cp313-manylinux_2_28_aarch64.whl#sha256=e4d4d5a14225875d9bf8c5221d43d8be97786adc498659493799bdeff52c54cf",
+    },
+    "cp39": {
+        "torch": "https://download-r2.pytorch.org/whl/cu128/torch-2.7.0%2Bcu128-cp39-cp39-manylinux_2_28_aarch64.whl#sha256=2f155388b1200e08f3e901bb3487ff93ca6d63cde87c29b97bb6762a8f63b373",
+        "torchvision": "https://download-r2.pytorch.org/whl/cu128/torchvision-0.22.0-cp39-cp39-manylinux_2_28_aarch64.whl#sha256=7a398fad02f4ac6b7d18bea9a08dc14163ffc5a368618f29ceb0e53dfa91f69e",
+    },
+}
+
+
 def pip(venv: Path, *args: str) -> None:
     is_win = platform.system() == "Windows"
     pip_exe = venv / ("Scripts/pip.exe" if is_win else "bin/pip")
@@ -56,7 +81,23 @@ def python_tag(venv: Path) -> str:
     ).strip()
 
 
-def setup(python_exe: str, ext_dir: Path, gpu_sm: int) -> None:
+def install_arm64_pytorch(venv: Path, wheel_map: dict[str, dict[str, str]], label: str) -> None:
+    py_tag = python_tag(venv)
+    wheel_urls = wheel_map.get(py_tag)
+    if wheel_urls is None:
+        raise RuntimeError(f"Unsupported Python version for Linux ARM64 PyTorch wheels: {py_tag}")
+
+    print(f"[setup] Installing pinned ARM64 wheels for {label} ({py_tag}) …")
+    pip(
+        venv,
+        "install",
+        "--no-cache-dir",
+        wheel_urls["torch"],
+        wheel_urls["torchvision"],
+    )
+
+
+def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) -> None:
     venv = ext_dir / "venv"
     machine = platform.machine().lower()
     is_linux_arm64 = platform.system() == "Linux" and machine in {"aarch64", "arm64"}
@@ -67,22 +108,22 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int) -> None:
     # ------------------------------------------------------------------ #
     # PyTorch — choose version based on GPU architecture
     # ------------------------------------------------------------------ #
-    if is_linux_arm64 and gpu_sm >= 70:
+    if is_linux_arm64 and (gpu_sm >= 100 or cuda_version >= 128):
+        # Match TripoSG's CUDA 12.8 selection, but keep ARM64 hardening.
+        print(f"[setup] GPU SM {gpu_sm}, CUDA {cuda_version}, Linux ARM64 -> PyTorch 2.7 + CUDA 12.8")
+        install_arm64_pytorch(venv, ARM64_CU128_WHEELS, "cu128")
+    elif is_linux_arm64 and gpu_sm >= 70:
         # Use direct wheel URLs on Linux ARM64 to avoid bad cache/CDN responses
         # while keeping the upstream-published sha256 integrity checks.
-        py_tag = python_tag(venv)
-        wheel_urls = ARM64_CU124_WHEELS.get(py_tag)
-        if wheel_urls is None:
-            raise RuntimeError(f"Unsupported Python version for Linux ARM64 PyTorch wheels: {py_tag}")
         print(f"[setup] GPU SM {gpu_sm}, Linux ARM64 -> PyTorch 2.5 + CUDA 12.4")
-        print(f"[setup] Installing pinned ARM64 wheels for {py_tag} …")
-        pip(
-            venv,
-            "install",
-            "--no-cache-dir",
-            wheel_urls["torch"],
-            wheel_urls["torchvision"],
-        )
+        install_arm64_pytorch(venv, ARM64_CU124_WHEELS, "cu124")
+    elif gpu_sm >= 100 or cuda_version >= 128:
+        # Match TripoSG's CUDA 12.8 path on non-ARM64 platforms too.
+        torch_index = "https://download.pytorch.org/whl/cu128"
+        torch_pkgs  = ["torch==2.7.0", "torchvision==0.22.0"]
+        print(f"[setup] GPU SM {gpu_sm}, CUDA {cuda_version} -> PyTorch 2.7 + CUDA 12.8")
+        print("[setup] Installing PyTorch …")
+        pip(venv, "install", *torch_pkgs, "--index-url", torch_index)
     elif gpu_sm >= 70:
         # Volta and newer — PyTorch 2.6 + CUDA 12.4
         torch_index = "https://download.pytorch.org/whl/cu124"
@@ -144,13 +185,14 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int) -> None:
 
 if __name__ == "__main__":
     # Accepts either JSON (from Electron) or positional args (for manual testing)
-    # Positional: python setup.py <python_exe> <ext_dir> <gpu_sm>
-    # JSON:       python setup.py '{"python_exe":"...","ext_dir":"...","gpu_sm":86}'
+    # Positional: python setup.py <python_exe> <ext_dir> <gpu_sm> [cuda_version]
+    # JSON:       python setup.py '{"python_exe":"...","ext_dir":"...","gpu_sm":86,"cuda_version":128}'
     if len(sys.argv) >= 4:
         setup(
             python_exe = sys.argv[1],
             ext_dir    = Path(sys.argv[2]),
             gpu_sm     = int(sys.argv[3]),
+            cuda_version = int(sys.argv[4]) if len(sys.argv) >= 5 else 0,
         )
     elif len(sys.argv) == 2:
         args = json.loads(sys.argv[1])
@@ -158,8 +200,9 @@ if __name__ == "__main__":
             python_exe = args["python_exe"],
             ext_dir    = Path(args["ext_dir"]),
             gpu_sm     = int(args["gpu_sm"]),
+            cuda_version = int(args.get("cuda_version", 0)),
         )
     else:
-        print("Usage: python setup.py <python_exe> <ext_dir> <gpu_sm>")
-        print('   or: python setup.py \'{"python_exe":"...","ext_dir":"...","gpu_sm":86}\'')
+        print("Usage: python setup.py <python_exe> <ext_dir> <gpu_sm> [cuda_version]")
+        print('   or: python setup.py \'{"python_exe":"...","ext_dir":"...","gpu_sm":86,"cuda_version":128}\'')
         sys.exit(1)

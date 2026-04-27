@@ -112,6 +112,7 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
     venv = ext_dir / "venv"
     machine = platform.machine().lower()
     is_linux_arm64 = platform.system() == "Linux" and machine in {"aarch64", "arm64"}
+    is_macos       = platform.system() == "Darwin"
 
     print(f"[setup] Creating venv at {venv} …")
     subprocess.run([python_exe, "-m", "venv", str(venv)], check=True)
@@ -119,7 +120,13 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
     # ------------------------------------------------------------------ #
     # PyTorch — choose version based on GPU architecture
     # ------------------------------------------------------------------ #
-    if is_linux_arm64 and (gpu_sm >= 100 or cuda_version >= 128):
+    if is_macos:
+        # macOS has no CUDA. Use PyPI's default wheels — on Apple Silicon
+        # they ship MPS (Metal) acceleration; on Intel Macs they are CPU-only.
+        print(f"[setup] macOS {machine} -> PyTorch from PyPI (MPS / CPU)")
+        print("[setup] Installing PyTorch …")
+        pip(venv, "install", "torch", "torchvision")
+    elif is_linux_arm64 and (gpu_sm >= 100 or cuda_version >= 128):
         # Match TripoSG's CUDA 12.8 selection, but keep ARM64 hardening.
         print(f"[setup] GPU SM {gpu_sm}, CUDA {cuda_version}, Linux ARM64 -> PyTorch 2.7 + CUDA 12.8")
         install_arm64_pytorch(venv, ARM64_CU128_WHEELS, "cu128", "https://download.pytorch.org/whl/cu128")
@@ -173,7 +180,11 @@ def setup(python_exe: str, ext_dir: Path, gpu_sm: int, cuda_version: int = 0) ->
     # rembg (background removal)
     # ------------------------------------------------------------------ #
     print("[setup] Installing rembg …")
-    if is_linux_arm64:
+    if is_macos:
+        # onnxruntime-gpu requires CUDA. macOS uses the CPU/CoreML build.
+        pip(venv, "install", "rembg")
+        pip(venv, "install", "onnxruntime")
+    elif is_linux_arm64:
         # rembg[gpu] pulls in onnxruntime-gpu, which has no linux_aarch64 wheel.
         pip(venv, "install", "rembg")
         pip(venv, "install", "onnxruntime")

@@ -3,6 +3,7 @@ Reference : https://huggingface.co/tencent/Hunyuan3D-2mini
 """
 import io
 import os
+import platform
 import random
 import sys
 import tempfile
@@ -22,6 +23,22 @@ _SUBFOLDER        = "hunyuan3d-dit-v2-mini"
 _GITHUB_ZIP       = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
 _PAINT_HF_REPO    = "tencent/Hunyuan3D-2"
 _PAINT_SUBFOLDER  = "hunyuan3d-paint-v2-0-turbo"
+
+# huggingface_hub spawns parallel download workers via multiprocessing. On
+# macOS that raced with our subprocess setup and crashed the runner mid-fetch
+# ("resource_tracker: leaked semaphore objects"). Force serial downloads on
+# Darwin; other platforms keep the default for speed.
+_HF_DOWNLOAD_KWARGS = {"max_workers": 1} if platform.system() == "Darwin" else {}
+
+
+def _log(msg: str) -> None:
+    """Write a status line to stderr.
+
+    Generator runs as a JSON-RPC subprocess where stdout is the protocol
+    channel — printing diagnostics there shows up as 'bad JSON' in the
+    parent's read loop. Stderr is forwarded as plain text instead.
+    """
+    print(msg, file=sys.stderr, flush=True)
 
 
 class Hunyuan3DMiniGenerator(BaseGenerator):
@@ -54,7 +71,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         dtype  = torch.float16 if device == "cuda" else torch.float32
 
         subfolder = self.download_check if self.download_check else _SUBFOLDER
-        print(f"[Hunyuan3DMiniGenerator] Loading pipeline from {self.model_dir} (subfolder={subfolder})…")
+        _log(f"[Hunyuan3DMiniGenerator] Loading pipeline from {self.model_dir} (subfolder={subfolder})…")
         pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
             str(self.model_dir),
             subfolder=subfolder,
@@ -63,7 +80,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             dtype=dtype,
         )
         self._model = pipeline
-        print(f"[Hunyuan3DMiniGenerator] Loaded on {device}.")
+        _log(f"[Hunyuan3DMiniGenerator] Loaded on {device}.")
 
     def unload(self) -> None:
         super().unload()
@@ -224,7 +241,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             return
 
         from huggingface_hub import snapshot_download
-        print(f"[Hunyuan3DMiniGenerator] Downloading paint model ({_PAINT_HF_REPO})…")
+        _log(f"[Hunyuan3DMiniGenerator] Downloading paint model ({_PAINT_HF_REPO})…")
         snapshot_download(
             repo_id=_PAINT_HF_REPO,
             local_dir=str(paint_dir),
@@ -239,20 +256,21 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                 "assets/**",
                 "*.md", "LICENSE", "NOTICE", ".gitattributes",
             ],
+            **_HF_DOWNLOAD_KWARGS,
         )
-        print("[Hunyuan3DMiniGenerator] Paint model downloaded.")
+        _log("[Hunyuan3DMiniGenerator] Paint model downloaded.")
 
     def _decimate(self, mesh, target_vertices: int):
         target_faces = max(4, target_vertices * 2)
         try:
             return mesh.simplify_quadric_decimation(target_faces)
         except Exception as exc:
-            print(f"[Hunyuan3DMiniGenerator] Decimation skipped: {exc}")
+            _log(f"[Hunyuan3DMiniGenerator] Decimation skipped: {exc}")
             return mesh
 
     def _download_weights(self) -> None:
         from huggingface_hub import snapshot_download
-        print(f"[Hunyuan3DMiniGenerator] Downloading {_HF_REPO_ID} (base variant)…")
+        _log(f"[Hunyuan3DMiniGenerator] Downloading {_HF_REPO_ID} (base variant)…")
         snapshot_download(
             repo_id=_HF_REPO_ID,
             local_dir=str(self.model_dir),
@@ -263,8 +281,9 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                 "hunyuan3d-vae-v2-mini-withencoder/**",
                 "*.md", "LICENSE", "NOTICE", ".gitattributes",
             ],
+            **_HF_DOWNLOAD_KWARGS,
         )
-        print("[Hunyuan3DMiniGenerator] Download complete.")
+        _log("[Hunyuan3DMiniGenerator] Download complete.")
 
     def _ensure_hy3dgen(self) -> None:
         try:
@@ -292,10 +311,10 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         import urllib.request
 
         dest.mkdir(parents=True, exist_ok=True)
-        print("[Hunyuan3DMiniGenerator] Downloading hy3dgen source from GitHub…")
+        _log("[Hunyuan3DMiniGenerator] Downloading hy3dgen source from GitHub…")
         with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
             data = resp.read()
-        print("[Hunyuan3DMiniGenerator] Extracting hy3dgen…")
+        _log("[Hunyuan3DMiniGenerator] Extracting hy3dgen…")
 
         prefix = "Hunyuan3D-2-main/hy3dgen/"
         strip  = "Hunyuan3D-2-main/"
@@ -312,7 +331,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                     target.parent.mkdir(parents=True, exist_ok=True)
                     target.write_bytes(zf.read(member))
 
-        print(f"[Hunyuan3DMiniGenerator] hy3dgen extracted to {dest}.")
+        _log(f"[Hunyuan3DMiniGenerator] hy3dgen extracted to {dest}.")
 
     @classmethod
     def params_schema(cls) -> list:

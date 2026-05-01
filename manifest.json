@@ -8,6 +8,12 @@
   "author": "Lightning Pixel",
   "generator_class": "Hunyuan3DMiniGenerator",
   "tags": ["image-to-3d", "texture", "low-vram"],
+  "compatibility": {
+    "platforms": ["win32", "linux", "darwin"],
+    "features": {
+      "texture": { "platforms": ["win32", "linux"] }
+    }
+  },
   "nodes": [
     {
       "id": "generate",

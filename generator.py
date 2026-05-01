@@ -16,7 +16,13 @@ from typing import Callable, Optional
 
 from PIL import Image
 
-from services.generators.base import BaseGenerator, smooth_progress, GenerationCancelled
+from services.generators.base import (
+    BaseGenerator,
+    smooth_progress,
+    GenerationCancelled,
+    pick_device,
+    release_device_memory,
+)
 
 _HF_REPO_ID       = "tencent/Hunyuan3D-2mini"
 _SUBFOLDER        = "hunyuan3d-dit-v2-mini"
@@ -64,11 +70,10 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
 
         self._ensure_hy3dgen()
 
-        import torch
         from hy3dgen.shapegen import Hunyuan3DDiTFlowMatchingPipeline
 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        dtype  = torch.float16 if device == "cuda" else torch.float32
+        device, dtype = pick_device()
+        self._device = device
 
         subfolder = self.download_check if self.download_check else _SUBFOLDER
         _log(f"[Hunyuan3DMiniGenerator] Loading pipeline from {self.model_dir} (subfolder={subfolder})…")
@@ -84,12 +89,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
 
     def unload(self) -> None:
         super().unload()
-        try:
-            import torch
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-        except ImportError:
-            pass
+        release_device_memory(getattr(self, "_device", None))
 
     # ------------------------------------------------------------------ #
     # Inference
@@ -117,15 +117,53 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         image = self._preprocess(image_bytes)
         self._check_cancelled(cancel_event)
 
-        shape_end = 70 if enable_texture else 82
-        self._report(progress_cb, 12, "Generating 3D shape…")
+        # Shape generation is a single pipeline call internally composed of
+        # (1) flow-matching diffusion (~num_steps fast steps) and (2) sparse
+        # volume decoding (slow, dominates wall time on CPU/MPS). hy3dgen
+        # writes its own 'Volume Decoding NN%' tqdm to stderr — the label
+        # below tells users the API-level bar plateaus while that runs and
+        # is not stuck. We split the smooth_progress into a short diffusion
+        # window (12→30) and a long decoding window (30→shape_end) and run
+        # them sequentially in the background thread.
+        shape_end       = 70 if enable_texture else 82
+        diffusion_end   = min(30, shape_end)
+        diffusion_label = "Diffusion sampling…"
+        decode_label    = "Volume decoding (this is the long step)…"
+        on_macos        = platform.system() == "Darwin"
+        if on_macos:
+            decode_label = "Volume decoding on MPS/CPU — may take several minutes…"
+
+        self._report(progress_cb, 12, diffusion_label)
         stop_evt = threading.Event()
         if progress_cb:
-            t = threading.Thread(
-                target=smooth_progress,
-                args=(progress_cb, 12, shape_end, "Generating 3D shape…", stop_evt),
-                daemon=True,
-            )
+            def _shape_progress() -> None:
+                # Phase 1 — diffusion (short). 'Diffusion sampling…' fills
+                # 12→28 quickly; once the underlying model starts volume
+                # decoding the smooth_progress thread will already be near
+                # diffusion_end, so we transition to the decoding label.
+                inner_stop = threading.Event()
+                phase1 = threading.Thread(
+                    target=smooth_progress,
+                    args=(progress_cb, 12, diffusion_end, diffusion_label, inner_stop, 1.5),
+                    daemon=True,
+                )
+                phase1.start()
+                # Heuristic: diffusion typically finishes within
+                # ~num_steps * 0.5 s on GPU, ~2-3 s on CPU. Wait either
+                # for the outer stop event (real generation finished) or
+                # for that estimate to elapse, then switch label.
+                est = max(8.0, num_steps * 1.0)
+                stop_evt.wait(est)
+                inner_stop.set()
+                phase1.join(timeout=2.0)
+                if stop_evt.is_set():
+                    return
+                self._report(progress_cb, diffusion_end, decode_label)
+                smooth_progress(
+                    progress_cb, diffusion_end, shape_end, decode_label, stop_evt
+                )
+
+            t = threading.Thread(target=_shape_progress, daemon=True)
             t.start()
 
         try:
@@ -148,10 +186,17 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         self._check_cancelled(cancel_event)
 
         if enable_texture:
+            if platform.system() == "Darwin":
+                # custom_rasterizer / differentiable_renderer are CUDA-only C++
+                # extensions; they don't build on macOS at all. Bail with an
+                # actionable message instead of trying and crashing later.
+                raise RuntimeError(
+                    "Texture generation requires CUDA — disable the Texture "
+                    "toggle on macOS. Shape-only generation is supported."
+                )
             self._report(progress_cb, 72, "Freeing VRAM for texture model…")
             self._model = None
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            release_device_memory(getattr(self, "_device", None))
 
             self._check_cancelled(cancel_event)
             mesh = self._run_texture(mesh, image, progress_cb)
@@ -215,8 +260,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         finally:
             os.unlink(tmp.name)
             del paint_pipeline
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
+            release_device_memory(getattr(self, "_device", None))
 
         return result[0] if isinstance(result, (list, tuple)) else result
 

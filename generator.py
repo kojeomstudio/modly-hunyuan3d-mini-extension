@@ -107,7 +107,12 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         num_steps        = int(params.get("num_inference_steps", 30))
         vert_count       = int(params.get("vertex_count", 0))
         enable_texture   = bool(params.get("enable_texture", False))
-        octree_res       = int(params.get("octree_resolution", 380))
+        # On Apple Silicon with 8–16 GB unified memory the default octree
+        # 380 reliably tips MPS into jetsam SIGKILL during volume decode.
+        # 256 still produces usable meshes and lands well under the limit.
+        # Users with more headroom can override via the params UI.
+        _octree_default  = 256 if platform.system() == "Darwin" else 380
+        octree_res       = int(params.get("octree_resolution", _octree_default))
         guidance_scale   = float(params.get("guidance_scale", 5.5))
         seed             = int(params.get("seed", -1))
         if seed == -1:

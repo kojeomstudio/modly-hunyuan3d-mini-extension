@@ -171,6 +171,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             t = threading.Thread(target=_shape_progress, daemon=True)
             t.start()
 
+        _log("[Hunyuan3DMiniGenerator] Starting pipeline inference…")
         try:
             with torch.no_grad():
                 import torch
@@ -184,11 +185,22 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                     generator=generator,
                     output_type="trimesh",
                 )
+            _log("[Hunyuan3DMiniGenerator] Pipeline returned, extracting mesh from outputs…")
             mesh = outputs[0]
+            _log(
+                f"[Hunyuan3DMiniGenerator] Got mesh "
+                f"(verts={len(getattr(mesh, 'vertices', []))}, "
+                f"faces={len(getattr(mesh, 'faces', []))})."
+            )
         finally:
             stop_evt.set()
 
         self._check_cancelled(cancel_event)
+        # Push the bar past the decoding plateau as soon as the model returns.
+        # Without this, the UI sat at the smoothed value (~80) for the entire
+        # mesh-export phase and looked frozen. Subsequent _report calls below
+        # will continue raising it.
+        self._report(progress_cb, 90, "Mesh ready, post-processing…")
 
         if enable_texture:
             if platform.system() == "Darwin":
@@ -207,14 +219,16 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
             mesh = self._run_texture(mesh, image, progress_cb)
         else:
             if vert_count > 0 and hasattr(mesh, "vertices") and len(mesh.vertices) > vert_count:
-                self._report(progress_cb, 85, "Optimizing mesh…")
+                self._report(progress_cb, 92, "Optimizing mesh…")
                 mesh = self._decimate(mesh, vert_count)
 
         self._report(progress_cb, 96, "Exporting GLB…")
         self.outputs_dir.mkdir(parents=True, exist_ok=True)
         name = f"{int(time.time())}_{uuid.uuid4().hex[:8]}.glb"
         path = self.outputs_dir / name
+        _log(f"[Hunyuan3DMiniGenerator] Exporting mesh → {path}")
         mesh.export(str(path))
+        _log("[Hunyuan3DMiniGenerator] Export complete.")
 
         self._report(progress_cb, 100, "Done")
         return path

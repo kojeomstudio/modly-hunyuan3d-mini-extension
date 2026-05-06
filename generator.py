@@ -440,6 +440,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                 "type":    "select",
                 "default": 380,
                 "options": [
+                    {"value": 192, "label": "Very Low"},
                     {"value": 256, "label": "Low"},
                     {"value": 380, "label": "Medium"},
                     {"value": 512, "label": "High"},

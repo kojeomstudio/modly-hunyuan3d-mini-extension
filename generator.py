@@ -186,11 +186,30 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                     output_type="trimesh",
                 )
             _log("[Hunyuan3DMiniGenerator] Pipeline returned, extracting mesh from outputs…")
-            mesh = outputs[0]
+            mesh = outputs[0] if outputs else None
+            # hy3dgen's surface extractor (surface_extractors.py:59-62) catches
+            # marching-cubes failures and substitutes None. The most common
+            # trigger on Apple Silicon is an MPS OOM during volume decoding —
+            # the command buffer aborts, the grid is corrupted, and skimage
+            # then raises "No surface found at the given iso value". Surface
+            # the real cause here instead of crashing on mesh.export below.
+            if mesh is None or not hasattr(mesh, "vertices") or len(mesh.vertices) == 0:
+                hint = (
+                    "Lower Mesh Resolution (try 192), close other GPU-heavy apps, "
+                    "or restart the API process to free MPS memory."
+                ) if platform.system() == "Darwin" else (
+                    "Try a higher Mesh Resolution, a different Seed, or an input "
+                    "image with a clearer foreground subject."
+                )
+                raise RuntimeError(
+                    "Mesh extraction failed — the volume decoder produced no "
+                    f"surface (octree_resolution={octree_res}). On Apple "
+                    "Silicon this is usually an MPS out-of-memory during "
+                    "volume decoding. " + hint
+                )
             _log(
                 f"[Hunyuan3DMiniGenerator] Got mesh "
-                f"(verts={len(getattr(mesh, 'vertices', []))}, "
-                f"faces={len(getattr(mesh, 'faces', []))})."
+                f"(verts={len(mesh.vertices)}, faces={len(mesh.faces)})."
             )
         finally:
             stop_evt.set()
@@ -326,10 +345,14 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
     def _decimate(self, mesh, target_vertices: int):
         target_faces = max(4, target_vertices * 2)
         try:
-            return mesh.simplify_quadric_decimation(target_faces)
+            simplified = mesh.simplify_quadric_decimation(target_faces)
         except Exception as exc:
             _log(f"[Hunyuan3DMiniGenerator] Decimation skipped: {exc}")
             return mesh
+        if simplified is None:
+            _log("[Hunyuan3DMiniGenerator] Decimation returned None; keeping original mesh.")
+            return mesh
+        return simplified
 
     def _download_weights(self) -> None:
         from huggingface_hub import snapshot_download

@@ -272,7 +272,7 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         self._check_texgen_extensions()
 
         self._report(progress_cb, 73, "Preparing texture model…")
-        self._ensure_paint_weights()
+        self._ensure_paint_weights(progress_cb=progress_cb)
 
         self._report(progress_cb, 78, "Loading texture model…")
         from hy3dgen.texgen import Hunyuan3DPaintPipeline
@@ -317,30 +317,32 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
                 f"Original error: {exc}"
             ) from exc
 
-    def _ensure_paint_weights(self) -> None:
+    def _ensure_paint_weights(self, progress_cb: Optional[Callable[[int, str], None]] = None) -> None:
         paint_dir = self.model_dir / "_paint_weights"
         if (paint_dir / _PAINT_SUBFOLDER).exists() and (paint_dir / "hunyuan3d-delight-v2-0").exists():
             return
 
         from huggingface_hub import snapshot_download
-        _log(f"[Hunyuan3DMiniGenerator] Downloading paint model ({_PAINT_HF_REPO})…")
-        snapshot_download(
-            repo_id=_PAINT_HF_REPO,
-            local_dir=str(paint_dir),
-            ignore_patterns=[
-                "hunyuan3d-dit-v2-0/**",
-                "hunyuan3d-dit-v2-0-fast/**",
-                "hunyuan3d-dit-v2-0-turbo/**",
-                "hunyuan3d-vae-v2-0/**",
-                "hunyuan3d-vae-v2-0-turbo/**",
-                "hunyuan3d-vae-v2-0-withencoder/**",
-                "hunyuan3d-paint-v2-0/**",
-                "assets/**",
-                "*.md", "LICENSE", "NOTICE", ".gitattributes",
-            ],
-            **_HF_DOWNLOAD_KWARGS,
-        )
-        _log("[Hunyuan3DMiniGenerator] Paint model downloaded.")
+
+        def _do() -> None:
+            snapshot_download(
+                repo_id=_PAINT_HF_REPO,
+                local_dir=str(paint_dir),
+                ignore_patterns=[
+                    "hunyuan3d-dit-v2-0/**",
+                    "hunyuan3d-dit-v2-0-fast/**",
+                    "hunyuan3d-dit-v2-0-turbo/**",
+                    "hunyuan3d-vae-v2-0/**",
+                    "hunyuan3d-vae-v2-0-turbo/**",
+                    "hunyuan3d-vae-v2-0-withencoder/**",
+                    "hunyuan3d-paint-v2-0/**",
+                    "assets/**",
+                    "*.md", "LICENSE", "NOTICE", ".gitattributes",
+                ],
+                **_HF_DOWNLOAD_KWARGS,
+            )
+
+        self._run_download(f"{_PAINT_HF_REPO} (paint weights)", _do, progress_cb=progress_cb, pct=74)
 
     def _decimate(self, mesh, target_vertices: int):
         target_faces = max(4, target_vertices * 2)
@@ -356,20 +358,22 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
 
     def _download_weights(self) -> None:
         from huggingface_hub import snapshot_download
-        _log(f"[Hunyuan3DMiniGenerator] Downloading {_HF_REPO_ID} (base variant)…")
-        snapshot_download(
-            repo_id=_HF_REPO_ID,
-            local_dir=str(self.model_dir),
-            ignore_patterns=[
-                "hunyuan3d-dit-v2-mini-fast/**",
-                "hunyuan3d-dit-v2-mini-turbo/**",
-                "hunyuan3d-vae-v2-mini-turbo/**",
-                "hunyuan3d-vae-v2-mini-withencoder/**",
-                "*.md", "LICENSE", "NOTICE", ".gitattributes",
-            ],
-            **_HF_DOWNLOAD_KWARGS,
-        )
-        _log("[Hunyuan3DMiniGenerator] Download complete.")
+
+        def _do() -> None:
+            snapshot_download(
+                repo_id=_HF_REPO_ID,
+                local_dir=str(self.model_dir),
+                ignore_patterns=[
+                    "hunyuan3d-dit-v2-mini-fast/**",
+                    "hunyuan3d-dit-v2-mini-turbo/**",
+                    "hunyuan3d-vae-v2-mini-turbo/**",
+                    "hunyuan3d-vae-v2-mini-withencoder/**",
+                    "*.md", "LICENSE", "NOTICE", ".gitattributes",
+                ],
+                **_HF_DOWNLOAD_KWARGS,
+            )
+
+        self._run_download(f"{_HF_REPO_ID} (base variant)", _do)
 
     def _ensure_hy3dgen(self) -> None:
         try:
@@ -397,9 +401,15 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         import urllib.request
 
         dest.mkdir(parents=True, exist_ok=True)
-        _log("[Hunyuan3DMiniGenerator] Downloading hy3dgen source from GitHub…")
-        with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
-            data = resp.read()
+
+        data_holder: dict = {}
+
+        def _do() -> None:
+            with urllib.request.urlopen(_GITHUB_ZIP, timeout=180) as resp:
+                data_holder["bytes"] = resp.read()
+
+        self._run_download("hy3dgen source from GitHub", _do)
+        data = data_holder["bytes"]
         _log("[Hunyuan3DMiniGenerator] Extracting hy3dgen…")
 
         prefix = "Hunyuan3D-2-main/hy3dgen/"

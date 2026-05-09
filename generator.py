@@ -26,7 +26,11 @@ from services.generators.base import (
 
 _HF_REPO_ID       = "tencent/Hunyuan3D-2mini"
 _SUBFOLDER        = "hunyuan3d-dit-v2-mini"
-_GITHUB_ZIP       = "https://github.com/Tencent/Hunyuan3D-2/archive/refs/heads/main.zip"
+# Pin hy3dgen to a known-good upstream commit so a breaking change to
+# Tencent/Hunyuan3D-2's main branch can't suddenly fail loading. Bump
+# this when we explicitly validate a newer revision.
+_HY3DGEN_SHA      = "8efbe53a7e09bffb3efc71045147afd0bbd149d4"
+_GITHUB_ZIP       = f"https://github.com/Tencent/Hunyuan3D-2/archive/{_HY3DGEN_SHA}.zip"
 _PAINT_HF_REPO    = "tencent/Hunyuan3D-2"
 _PAINT_SUBFOLDER  = "hunyuan3d-paint-v2-0-turbo"
 
@@ -412,8 +416,9 @@ class Hunyuan3DMiniGenerator(BaseGenerator):
         data = data_holder["bytes"]
         _log("[Hunyuan3DMiniGenerator] Extracting hy3dgen…")
 
-        prefix = "Hunyuan3D-2-main/hy3dgen/"
-        strip  = "Hunyuan3D-2-main/"
+        # GitHub commit-archive top-level dir is "<repo>-<full_sha>".
+        prefix = f"Hunyuan3D-2-{_HY3DGEN_SHA}/hy3dgen/"
+        strip  = f"Hunyuan3D-2-{_HY3DGEN_SHA}/"
 
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             for member in zf.namelist():
